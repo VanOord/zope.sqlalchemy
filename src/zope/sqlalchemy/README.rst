@@ -187,7 +187,7 @@ to the DB.
     >>> session = Session()
     >>> conn = session.connection()
     >>> users = Base.metadata.tables['test_users']
-    >>> conn.execute(users.update().where(users.c.name=='bob'), name='ben')
+    >>> conn.execute(users.update().where(users.c.name=='bob').values(name='ben'))
     <sqlalchemy.engine... object at ...>
     >>> from zope.sqlalchemy import mark_changed
     >>> mark_changed(session)
@@ -205,7 +205,7 @@ session in the 'changed' state initially.
     <zope.sqlalchemy.datamanager.ZopeTransactionEvents object at ...>
     >>> session = Session()
     >>> conn = session.connection()
-    >>> conn.execute(users.update().where(users.c.name=='ben'), name='bob')
+    >>> conn.execute(users.update().where(users.c.name=='ben').values(name='bob'))
     <sqlalchemy.engine... object at ...>
     >>> transaction.commit()
     >>> session = Session()
