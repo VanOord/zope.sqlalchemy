@@ -96,10 +96,13 @@ This example is lifted directly from the SQLAlchemy declarative documentation.
 First the necessary imports.
 
     >>> from sqlalchemy import *
-    >>> from sqlalchemy.orm import declarative_base
     >>> from sqlalchemy.orm import scoped_session, sessionmaker, relationship
     >>> from zope.sqlalchemy import register
     >>> import transaction
+    >>> try:
+    ...     from sqlalchemy.orm import declarative_base
+    ... except ImportError:
+    ...     from sqlalchemy.ext.declarative import declarative_base
 
 Now to define the mapper classes.
 

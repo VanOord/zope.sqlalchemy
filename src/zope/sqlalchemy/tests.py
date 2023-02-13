@@ -146,7 +146,17 @@ class TestTwo(SimpleModel):
     pass
 
 
-mapper_registry = orm.registry()
+try:
+    mapper_registry = orm.registry()
+except AttributeError:
+    class MockMapperRegistry:
+        def map_imperatively(self, *args, **kwargs):
+            return orm.mapper(*args, **kwargs)
+
+        def dispose(self, *args, **kwargs):
+            return orm.clear_mappers(*args, **kwargs)
+
+    mapper_registry = MockMapperRegistry()
 
 
 def setup_mappers():
@@ -305,7 +315,10 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
             d, {"firstname": "udo", "lastname": "juergens", "id": 1})
 
         # bypass the session machinery
-        stmt = sql.select(*test_users.columns).order_by("id")
+        try:
+            stmt = sql.select(*test_users.columns).order_by("id")
+        except exc.ArgumentError:
+            stmt = sql.select(test_users.columns).order_by("id")
         conn = session.connection()
         results = conn.execute(stmt)
         self.assertEqual(
@@ -662,7 +675,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
             with transaction.manager:
                 session.add(User(id=1, firstname="foo", lastname="bar"))
 
-            user = session.get(User, 1)
+            user = session.query(User).filter(User.id == 1).one()
 
             # if the keep_session works correctly, this transaction will not
             # close the session after commit
@@ -683,7 +696,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         transaction.commit()
 
         session = Session()
-        instance = session.get(User, 1)
+        instance = session.query(User).filter(User.id == 1).one()
         transaction.commit()  # No work, session.close()
 
         self.assertEqual(sa.inspect(instance).expired, True)
@@ -727,7 +740,7 @@ class RetryTests(unittest.TestCase):
             len(s2.query(User).all()) == 1, "Users table should have one row"
         )
         s1.query(User).delete()
-        user = s2.get(User, 1)
+        user = s2.query(User).filter(User.id == 1).one()
         user.lastname = "smith"
         tm1.commit()
         raised = False
