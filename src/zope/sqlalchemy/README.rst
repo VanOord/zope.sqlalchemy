@@ -96,10 +96,13 @@ This example is lifted directly from the SQLAlchemy declarative documentation.
 First the necessary imports.
 
     >>> from sqlalchemy import *
-    >>> from sqlalchemy.ext.declarative import declarative_base
-    >>> from sqlalchemy.orm import scoped_session, sessionmaker, relation
+    >>> from sqlalchemy.orm import scoped_session, sessionmaker, relationship
     >>> from zope.sqlalchemy import register
     >>> import transaction
+    >>> try:
+    ...     from sqlalchemy.orm import declarative_base
+    ... except ImportError:
+    ...     from sqlalchemy.ext.declarative import declarative_base
 
 Now to define the mapper classes.
 
@@ -108,7 +111,7 @@ Now to define the mapper classes.
     ...     __tablename__ = 'test_users'
     ...     id = Column('id', Integer, primary_key=True)
     ...     name = Column('name', String(50))
-    ...     addresses = relation("Address", backref="user")
+    ...     addresses = relationship("Address", backref="user")
     >>> class Address(Base):
     ...     __tablename__ = 'test_addresses'
     ...     id = Column('id', Integer, primary_key=True)
@@ -146,7 +149,7 @@ machinery, just as Zope's publisher would.
 
 Engine level connections are outside the scope of the transaction integration.
 
-    >>> engine.connect().execute('SELECT * FROM test_users').fetchall()
+    >>> engine.connect().execute(text('SELECT * FROM test_users')).fetchall()
     [(1, ...'bob')]
 
 A new transaction requires a new session. Let's add an address.
@@ -187,7 +190,7 @@ to the DB.
     >>> session = Session()
     >>> conn = session.connection()
     >>> users = Base.metadata.tables['test_users']
-    >>> conn.execute(users.update(users.c.name=='bob'), name='ben')
+    >>> conn.execute(users.update().where(users.c.name=='bob').values(name='ben'))
     <sqlalchemy.engine... object at ...>
     >>> from zope.sqlalchemy import mark_changed
     >>> mark_changed(session)
@@ -205,7 +208,7 @@ session in the 'changed' state initially.
     <zope.sqlalchemy.datamanager.ZopeTransactionEvents object at ...>
     >>> session = Session()
     >>> conn = session.connection()
-    >>> conn.execute(users.update(users.c.name=='ben'), name='bob')
+    >>> conn.execute(users.update().where(users.c.name=='ben').values(name='bob'))
     <sqlalchemy.engine... object at ...>
     >>> transaction.commit()
     >>> session = Session()

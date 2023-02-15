@@ -127,14 +127,14 @@ test_skills = sa.Table(
     sa.ForeignKeyConstraint(("user_id",), ("test_users.id",)),
 )
 
-bound_metadata1 = sa.MetaData(engine)
-bound_metadata2 = sa.MetaData(engine2)
+metadata1 = sa.MetaData()
+metadata2 = sa.MetaData()
 
 test_one = sa.Table(
-    "test_one", bound_metadata1, sa.Column("id", sa.Integer, primary_key=True)
+    "test_one", metadata1, sa.Column("id", sa.Integer, primary_key=True)
 )
 test_two = sa.Table(
-    "test_two", bound_metadata2, sa.Column("id", sa.Integer, primary_key=True)
+    "test_two", metadata2, sa.Column("id", sa.Integer, primary_key=True)
 )
 
 
@@ -146,15 +146,28 @@ class TestTwo(SimpleModel):
     pass
 
 
+try:
+    mapper_registry = orm.registry()
+except AttributeError:
+    class MockMapperRegistry:
+        def map_imperatively(self, *args, **kwargs):
+            return orm.mapper(*args, **kwargs)
+
+        def dispose(self, *args, **kwargs):
+            return orm.clear_mappers(*args, **kwargs)
+
+    mapper_registry = MockMapperRegistry()
+
+
 def setup_mappers():
-    orm.clear_mappers()
-    # Other tests can clear mappers by calling clear_mappers(),
+    mapper_registry.dispose()
+    # Other tests can clear mappers by calling mapper_registry.dispose(),
     # be more robust by setting up mappers in the test setup.
-    m1 = orm.mapper(
+    m1 = mapper_registry.map_imperatively(
         User,
         test_users,
         properties={
-            "skills": orm.relation(
+            "skills": orm.relationship(
                 Skill,
                 primaryjoin=(
                     test_users.columns["id"] == test_skills.columns["user_id"]
@@ -162,10 +175,10 @@ def setup_mappers():
             )
         },
     )
-    m2 = orm.mapper(Skill, test_skills)
+    m2 = mapper_registry.map_imperatively(Skill, test_skills)
 
-    m3 = orm.mapper(TestOne, test_one)
-    m4 = orm.mapper(TestTwo, test_two)
+    m3 = mapper_registry.map_imperatively(TestOne, test_one)
+    m4 = mapper_registry.map_imperatively(TestTwo, test_two)
     return [m1, m2, m3, m4]
 
 
@@ -226,7 +239,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
     def tearDown(self):
         transaction.abort()
         metadata.drop_all(engine)
-        orm.clear_mappers()
+        mapper_registry.dispose()
 
     def testMarkUnknownSession(self):
         import zope.sqlalchemy.datamanager
@@ -253,7 +266,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         transaction.begin()
         session = Session()
         conn = session.connection()
-        conn.execute("SELECT 1 FROM test_users")
+        conn.execute(sa.text("SELECT 1 FROM test_users"))
         mark_changed(session)
         transaction.commit()
 
@@ -267,7 +280,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         conn = session.connection()
         # At least PostgresSQL requires a rollback after invalid SQL is
         # executed
-        self.assertRaises(Exception, conn.execute, "BAD SQL SYNTAX")
+        self.assertRaises(Exception, conn.execute, sa.text("BAD SQL SYNTAX"))
         mark_changed(session)
         try:
             # Thus we could fail in commit
@@ -280,7 +293,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         transaction.begin()
         session = Session()
         conn = session.connection()
-        conn.execute("SELECT 1 FROM test_users")
+        conn.execute(sa.text("SELECT 1 FROM test_users"))
         mark_changed(session)
         transaction.commit()
 
@@ -302,7 +315,10 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
             d, {"firstname": "udo", "lastname": "juergens", "id": 1})
 
         # bypass the session machinery
-        stmt = sql.select(test_users.columns).order_by("id")
+        try:
+            stmt = sql.select(*test_users.columns).order_by("id")
+        except exc.ArgumentError:
+            stmt = sql.select(test_users.columns).order_by("id")
         conn = session.connection()
         results = conn.execute(stmt)
         self.assertEqual(
@@ -593,7 +609,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         session.query(User).update(dict(lastname="smith"))
         transaction.commit()
         results = engine.connect().execute(
-            test_users.select(test_users.c.lastname == "smith")
+            test_users.select().where(test_users.c.lastname == "smith")
         )
         self.assertEqual(len(results.fetchall()), 2)
 
@@ -617,7 +633,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         session.query(User).update(dict(lastname="smith"))
         transaction.commit()
         results = engine.connect().execute(
-            test_users.select(test_users.c.lastname == "smith")
+            test_users.select().where(test_users.c.lastname == "smith")
         )
         self.assertEqual(len(results.fetchall()), 2)
 
@@ -659,7 +675,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
             with transaction.manager:
                 session.add(User(id=1, firstname="foo", lastname="bar"))
 
-            user = session.query(User).get(1)
+            user = session.query(User).filter(User.id == 1).one()
 
             # if the keep_session works correctly, this transaction will not
             # close the session after commit
@@ -680,7 +696,7 @@ class ZopeSQLAlchemyTests(unittest.TestCase):
         transaction.commit()
 
         session = Session()
-        instance = session.query(User).get(1)
+        instance = session.query(User).filter(User.id == 1).one()
         transaction.commit()  # No work, session.close()
 
         self.assertEqual(sa.inspect(instance).expired, True)
@@ -709,7 +725,7 @@ class RetryTests(unittest.TestCase):
         self.tm1.abort()
         self.tm2.abort()
         metadata.drop_all(engine)
-        orm.clear_mappers()
+        mapper_registry.dispose()
 
     def testRetry(self):
         # sqlite is unable to run this test as the databse is locked
@@ -724,7 +740,7 @@ class RetryTests(unittest.TestCase):
             len(s2.query(User).all()) == 1, "Users table should have one row"
         )
         s1.query(User).delete()
-        user = s2.query(User).get(1)
+        user = s2.query(User).filter(User.id == 1).one()
         user.lastname = "smith"
         tm1.commit()
         raised = False
@@ -746,7 +762,9 @@ class RetryTests(unittest.TestCase):
             len(s1.query(User).all()) == 1, "Users table should have one row"
         )
         tm2.begin()
-        s2.connection().execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        s2.connection().execute(
+            sa.text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        )
         self.assertTrue(
             len(s2.query(User).all()) == 1, "Users table should have one row"
         )
@@ -774,24 +792,28 @@ class RetryTests(unittest.TestCase):
 class MultipleEngineTests(unittest.TestCase):
     def setUp(self):
         self.mappers = setup_mappers()
-        bound_metadata1.drop_all()
-        bound_metadata1.create_all()
-        bound_metadata2.drop_all()
-        bound_metadata2.create_all()
+        metadata1.drop_all(engine)
+        metadata1.create_all(engine)
+        metadata2.drop_all(engine2)
+        metadata2.create_all(engine2)
 
     def tearDown(self):
         transaction.abort()
-        bound_metadata1.drop_all()
-        bound_metadata2.drop_all()
-        orm.clear_mappers()
+        metadata1.drop_all(engine)
+        metadata2.drop_all(engine2)
+        mapper_registry.dispose()
 
     def testTwoEngines(self):
         session = UnboundSession()
+        session.bind_table(TestOne, bind=engine)
+        session.bind_table(TestTwo, bind=engine2)
         session.add(TestOne(id=1))
         session.add(TestTwo(id=2))
         session.flush()
         transaction.commit()
         session = UnboundSession()
+        session.bind_table(TestOne, bind=engine)
+        session.bind_table(TestTwo, bind=engine2)
         rows = session.query(TestOne).all()
         self.assertEqual(len(rows), 1)
         rows = session.query(TestTwo).all()
